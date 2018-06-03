@@ -107,7 +107,7 @@ hostaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 // Bind socket to ip 0.0.0.0, port 7168
 bind(sockfd, (struct sockaddr*) &hostaddr, sizeof(hostaddr));
 ```
-Translated to x86 assemnly:
+Translated to x86 assembly:
 ```asm
 ; bind(sockid, struct addr, len addr)
 xor eax, eax    ; Clear EAX
