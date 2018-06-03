@@ -37,6 +37,7 @@ main:
     inc ebx             ; SYS_BIND
     ; Setup struct addr
     push edx            ; 0.0.0.0 (this is why we needed EDX at line 5)
+    sub esp, 2          ; Move ESP so we don't overwrite ip-addr
     mov byte [esp], $byte1; Push port byte 1
     mov byte [esp+1], $byte2; Push port byte 2
     push word 0x2       ; AF_INET
