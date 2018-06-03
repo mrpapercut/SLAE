@@ -116,9 +116,10 @@ xor ebx, ebx    ; Clear EBX
 mov bl, 0x2     ; SYS_BIND
 ; Setup struct addr
 push EDX        ; 0.0.0.0 (EDX is still all 0s)
+sub esp, 2      ; Move ESP so we don't overwrite ip-addr
 mov byte [esp], 0x1c    ; Push first byte for port
 mov byte [esp+1], dl    ; Push second byte for port
-push 0x2        ; AF_INET
+push word 0x2   ; AF_INET
 mov ecx, esp    ; Store ref to struct in ECX
 ; Setup bind arguments
 push 0x10       ; Addr length (16)
@@ -239,9 +240,10 @@ main:
     mov bl, 0x2     ; SYS_BIND
     ; Setup struct addr
     push edx        ; 0.0.0.0
+    sub esp, 2      ; Move ESP so we don't overwrite ip-addr
     mov byte [esp], 0x1c    ; Push first byte for port
     mov byte [esp+1], dl    ; Push second byte for port
-    push 0x2        ; AF_INET
+    push word 0x2   ; AF_INET
     mov ecx, esp    ; Store struct in ECX
     ; Setup bind arguments
     push 0x10       ; Addr length (16)
@@ -300,6 +302,8 @@ main:
     mov ecx, edx    ; NULL
     int 0x80
 ```
+
+When we compile and run this code, we can see that it works:
 
 
 
